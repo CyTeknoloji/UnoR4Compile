@@ -1,0 +1,114 @@
+name: UNO R4 Bulut Derleyici
+
+on:
+  workflow_dispatch:
+    inputs:
+      sketch_code:
+        description: 'Kod'
+        required: true
+      libraries:
+        description: 'Kutuphaneler (virgulle)'
+        required: false
+      library_files:
+        description: 'Uygulamadan zip kutuphaneler (JSON)'
+        required: false
+      board_type:
+        description: 'Kart modeli (FQBN)'
+        required: true
+        default: 'arduino:renesas_uno:unor4wifi'
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Arduino CLI Kur
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
+          echo "$GITHUB_WORKSPACE/bin" >> $GITHUB_PATH
+
+      - name: Renesas UNO R4 onbellegi
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.arduino15
+            ~/Arduino/libraries
+          key: ${{ runner.os }}-renesas-uno-v1
+
+      - name: Cekirdek ve kutuphaneleri hazirla
+        env:
+          LIBS: ${{ github.event.inputs.libraries }}
+        run: |
+          CLI=./bin/arduino-cli
+          $CLI core update-index
+          $CLI core install arduino:renesas_uno
+
+          install_one() {
+            local trim_lib="$1"
+            [ -z "$trim_lib" ] && return 0
+            $CLI lib install "$trim_lib" || true
+          }
+
+          if [ -n "${LIBS:-}" ]; then
+            echo "$LIBS" | tr ',' '\n' | while IFS= read -r lib; do
+              install_one "$(echo "$lib" | xargs)"
+            done
+          fi
+
+      - name: Uygulamadan gelen kutuphane zip dosyalari
+        env:
+          LIBRARY_FILES: ${{ github.event.inputs.library_files }}
+        run: |
+          python3 <<'PY'
+          import os, json, base64, zipfile, shutil, tempfile
+          from io import BytesIO
+          raw = os.environ.get("LIBRARY_FILES", "")
+          if not raw.strip():
+              print("library_files bos")
+          else:
+              libs = os.path.expanduser("~/Arduino/libraries")
+              os.makedirs(libs, exist_ok=True)
+              for item in json.loads(raw):
+                  name = (item.get("name") or "CustomLib").strip()
+                  data = base64.b64decode(item.get("zip") or "")
+                  target = os.path.join(libs, name)
+                  os.makedirs(target, exist_ok=True)
+                  with tempfile.TemporaryDirectory() as tmp:
+                      with zipfile.ZipFile(BytesIO(data)) as zf:
+                          zf.extractall(tmp)
+                      entries = [e for e in os.listdir(tmp) if not e.startswith(".")]
+                      root = os.path.join(tmp, entries[0]) if len(entries) == 1 and os.path.isdir(os.path.join(tmp, entries[0])) else tmp
+                      for item_name in os.listdir(root):
+                          src = os.path.join(root, item_name)
+                          dst = os.path.join(target, item_name)
+                          if os.path.isdir(src):
+                              shutil.copytree(src, dst, dirs_exist_ok=True)
+                          else:
+                              shutil.copy2(src, dst)
+                  print("Installed", name)
+          PY
+
+      - name: Sketch hazirla
+        shell: python
+        env:
+          SKETCH_INPUT: ${{ github.event.inputs.sketch_code }}
+        run: |
+          import os
+          content = os.environ.get("SKETCH_INPUT", "")
+          os.makedirs("MySketch", exist_ok=True)
+          with open("MySketch/MySketch.ino", "w", encoding="utf-8") as f:
+              f.write(content)
+
+      - name: Derle
+        run: |
+          mkdir -p output
+          ./bin/arduino-cli compile --fqbn "${{ github.event.inputs.board_type }}" MySketch --output-dir ./output
+
+      - name: BIN yayinla
+        uses: actions/upload-artifact@v4
+        with:
+          name: unor4_build
+          path: output/*.bin
+          if-no-files-found: error
