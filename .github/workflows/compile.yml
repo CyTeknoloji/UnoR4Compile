@@ -35,7 +35,7 @@ jobs:
           path: |
             ~/.arduino15
             ~/Arduino/libraries
-          key: ${{ runner.os }}-renesas-uno-v1
+          key: ${{ runner.os }}-renesas-uno-v2
 
       - name: Cekirdek ve kutuphaneleri hazirla
         env:
@@ -61,34 +61,7 @@ jobs:
         env:
           LIBRARY_FILES: ${{ github.event.inputs.library_files }}
         run: |
-          python3 <<'PY'
-          import os, json, base64, zipfile, shutil, tempfile
-          from io import BytesIO
-          raw = os.environ.get("LIBRARY_FILES", "")
-          if not raw.strip():
-              print("library_files bos")
-          else:
-              libs = os.path.expanduser("~/Arduino/libraries")
-              os.makedirs(libs, exist_ok=True)
-              for item in json.loads(raw):
-                  name = (item.get("name") or "CustomLib").strip()
-                  data = base64.b64decode(item.get("zip") or "")
-                  target = os.path.join(libs, name)
-                  os.makedirs(target, exist_ok=True)
-                  with tempfile.TemporaryDirectory() as tmp:
-                      with zipfile.ZipFile(BytesIO(data)) as zf:
-                          zf.extractall(tmp)
-                      entries = [e for e in os.listdir(tmp) if not e.startswith(".")]
-                      root = os.path.join(tmp, entries[0]) if len(entries) == 1 and os.path.isdir(os.path.join(tmp, entries[0])) else tmp
-                      for item_name in os.listdir(root):
-                          src = os.path.join(root, item_name)
-                          dst = os.path.join(target, item_name)
-                          if os.path.isdir(src):
-                              shutil.copytree(src, dst, dirs_exist_ok=True)
-                          else:
-                              shutil.copy2(src, dst)
-                  print("Installed", name)
-          PY
+          python3 scripts/install_library_files.py
 
       - name: Sketch hazirla
         shell: python
