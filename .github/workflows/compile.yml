@@ -43,7 +43,7 @@ jobs:
         run: |
           CLI=./bin/arduino-cli
           $CLI core update-index
-          $CLI core install arduino:renesas_uno
+          $CLI core install arduino:renesas_uno@1.6.0
 
           install_one() {
             local trim_lib="$1"
