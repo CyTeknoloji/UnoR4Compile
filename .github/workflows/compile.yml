@@ -71,9 +71,41 @@ jobs:
 
           if [ -n "${LIBS:-}" ]; then
             echo "$LIBS" | tr ',' '\n' | while IFS= read -r lib; do
+              case "$lib" in *lm:*|*git:*) continue ;; esac
               install_one "$(echo "$lib" | xargs)"
             done
           fi
+
+      - name: Kutuphane yoneticisi (lm / git)
+        shell: bash
+        env:
+          LIBS: ${{ github.event.inputs.libraries }}
+          ARDUINO_LIBRARY_ENABLE_UNSAFE_INSTALL: "true"
+        run: |
+          CLI=./bin/arduino-cli
+          if [ -z "${LIBS:-}" ]; then
+            exit 0
+          fi
+          printf '%s\n' "$LIBS" | tr ',' '\n' | while IFS= read -r raw; do
+            item="$(printf '%s' "$raw" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+            case "$item" in
+              lm:*)
+                name="${item#lm:}"
+                [ -z "$name" ] && continue
+                echo "--- Library Manager: $name ---"
+                $CLI lib install "$name" || echo "UYARI: $name kurulamadi"
+                ;;
+              git:*)
+                url="${item#git:}"
+                if printf '%s' "$url" | grep -Eq '^https://(github\.com|gitlab\.com|bitbucket\.org)/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(\.git)?(#[A-Za-z0-9_./-]+)?$'; then
+                  echo "--- Git: $url ---"
+                  $CLI lib install --git-url "$url" || echo "UYARI: $url kurulamadi"
+                else
+                  echo "UYARI: gecersiz git adresi atlandi: $url"
+                fi
+                ;;
+            esac
+          done
 
       - name: Uygulamadan gelen kutuphane zip dosyalari
         env:
